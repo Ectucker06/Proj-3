@@ -13,6 +13,25 @@
       text-align: center;
     }
 
+    h1 {
+      margin-top: 18px;
+      font-size: 42px;
+      letter-spacing: 4px;
+      color: #f8fafc;
+      text-shadow:
+        0 0 6px #facc15,
+        0 0 12px #38bdf8,
+        0 0 20px #818cf8;
+    }
+
+    h1::before,
+    h1::after {
+      content: "✦";
+      color: #facc15;
+      margin: 0 12px;
+      text-shadow: 0 0 10px #facc15;
+    }
+
     canvas {
       background: #0f172a;
       display: block;
@@ -36,21 +55,29 @@
 <canvas id="gameCanvas" width="800" height="600"></canvas>
 
 <script>
-// ==============================
+// ======================================================
 // 1. CANVAS SETUP
-// ==============================
+// ======================================================
+// The canvas is the playable game screen.
+// ctx is the 2D drawing tool used for the player, sparks, moths, HUD, and glow.
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 
 
-// ==============================
+// ======================================================
 // 2. GAME STATE
-// ==============================
+// ======================================================
+// keys stores current keyboard input.
+// gameState controls whether the game is playing, won, or lost.
 let keys = {};
 let gameState = "playing";
+
+// Timer state for the survival win condition.
 let survivalFrames = 0;
 let survivalSeconds = 0;
 
+// Player state.
+// The player owns position, size, and movement speed.
 let player = {
   x: 400,
   y: 300,
@@ -58,19 +85,32 @@ let player = {
   speed: 3.5
 };
 
+// System 1 state: Glow.
+// glow is the survival resource.
+// glowRadius is calculated from glow and affects moth behavior.
 let glow = 60;
 let glowRadius = 120;
 
+// Counts how many sparks/lights the player has collected.
+// This is feedback/incentive, not a third gameplay system.
+let lightsAcquired = 0;
+
+// System 1 objects.
 let sparks = [];
+
+// System 2 objects.
 let moths = [];
 
+// Tunable values.
 const MAX_GLOW = 100;
-const WIN_TIME = 90;
+const WIN_TIME = 60;
 
 
-// ==============================
+// ======================================================
 // 3. INPUT SYSTEM
-// ==============================
+// ======================================================
+// Keydown marks a key as pressed.
+// Pressing R restarts the game.
 document.addEventListener("keydown", (e) => {
   keys[e.key] = true;
 
@@ -79,22 +119,26 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+// Keyup marks a key as released.
 document.addEventListener("keyup", (e) => {
   keys[e.key] = false;
 });
 
 
-// ==============================
+// ======================================================
 // 4. UTILITY FUNCTIONS
-// ==============================
+// ======================================================
+// Measures distance between two circular objects.
 function distance(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
+// Keeps a value inside a min/max range.
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+// Returns a random position inside the canvas with a margin.
 function randomPosition(margin = 30) {
   return {
     x: margin + Math.random() * (canvas.width - margin * 2),
@@ -103,9 +147,10 @@ function randomPosition(margin = 30) {
 }
 
 
-// ==============================
-// 5. SETUP OBJECTS
-// ==============================
+// ======================================================
+// 5. OBJECT SPAWNING
+// ======================================================
+// Sparks restore glow when collected.
 function spawnSpark() {
   const pos = randomPosition(40);
 
@@ -116,6 +161,7 @@ function spawnSpark() {
   };
 }
 
+// Moths wander until the player glow activates them.
 function spawnMoth() {
   const pos = randomPosition(40);
 
@@ -128,6 +174,7 @@ function spawnMoth() {
   };
 }
 
+// Resets sparks and moths at the start or restart.
 function initializeObjects() {
   sparks = [];
   moths = [];
@@ -142,9 +189,11 @@ function initializeObjects() {
 }
 
 
-// ==============================
+// ======================================================
 // 6. PLAYER MOVEMENT
-// ==============================
+// ======================================================
+// Reads input and moves the player.
+// Movement is not one of the two core systems; it is the control method.
 function updatePlayer() {
   let dx = 0;
   let dy = 0;
@@ -164,44 +213,56 @@ function updatePlayer() {
   player.x += dx * player.speed;
   player.y += dy * player.speed;
 
+  // Keep player inside the screen.
   player.x = clamp(player.x, player.radius, canvas.width - player.radius);
   player.y = clamp(player.y, player.radius, canvas.height - player.radius);
 }
 
 
-// ==============================
+// ======================================================
 // 7. SYSTEM 1: GLOW SYSTEM
-// ==============================
-// Glow drains over time, increases when sparks are collected,
+// ======================================================
+// One-sentence system description:
+// The Glow System drains over time, increases when sparks are collected,
 // and controls the size of the lantern radius.
 function updateGlowSystem() {
+  // Passive glow drain.
   glow -= 0.05;
 
+  // Spark collection.
   for (let i = sparks.length - 1; i >= 0; i--) {
     if (distance(player, sparks[i]) < player.radius + sparks[i].radius) {
       glow += 25;
+
+      // Incentive/feedback counter.
+      lightsAcquired++;
+
       sparks[i] = spawnSpark();
     }
   }
 
+  // Keep glow valid.
   glow = clamp(glow, 0, MAX_GLOW);
 
-  // More glow means a larger radius.
+  // Main interaction point:
+  // More glow means a larger radius, which activates more moths.
   glowRadius = 40 + (glow / MAX_GLOW) * 140;
 }
 
 
-// ==============================
+// ======================================================
 // 8. SYSTEM 2: MOTH SYSTEM
-// ==============================
-// Moths wander normally, but if they enter the glow radius,
-// they chase the player and damage glow on contact.
+// ======================================================
+// One-sentence system description:
+// The Moth System makes moths wander until they enter the glow radius,
+// then chase the player and reduce glow on contact.
 function updateMothSystem() {
   for (let moth of moths) {
     const distToPlayer = distance(moth, player);
 
     if (distToPlayer < glowRadius) {
-      // Chase player when inside glow.
+      // Interaction with Glow System:
+      // The moth only chases because the glow radius reaches it.
       const dx = player.x - moth.x;
       const dy = player.y - moth.y;
       const length = Math.hypot(dx, dy);
@@ -211,7 +272,7 @@ function updateMothSystem() {
         moth.y += (dy / length) * 1.6;
       }
     } else {
-      // Wander when outside glow.
+      // Outside the glow radius, moths only wander.
       moth.wanderTimer--;
 
       if (moth.wanderTimer <= 0) {
@@ -223,14 +284,16 @@ function updateMothSystem() {
       moth.y += Math.sin(moth.wanderAngle) * 0.5;
     }
 
+    // Keep moths inside the canvas.
     moth.x = clamp(moth.x, moth.radius, canvas.width - moth.radius);
     moth.y = clamp(moth.y, moth.radius, canvas.height - moth.radius);
 
-    // Contact damage.
+    // Contact damage:
+    // If a moth touches the player, it reduces glow.
     if (distance(moth, player) < moth.radius + player.radius) {
       glow -= 15;
 
-      // Push moth away after contact so it does not drain instantly.
+      // Push moth away so it does not instantly drain glow every frame.
       const dx = moth.x - player.x;
       const dy = moth.y - player.y;
       const length = Math.hypot(dx, dy) || 1;
@@ -244,9 +307,10 @@ function updateMothSystem() {
 }
 
 
-// ==============================
-// 9. GAME STATE
-// ==============================
+// ======================================================
+// 9. GAME STATE SYSTEM
+// ======================================================
+// Tracks time and checks win/loss conditions.
 function updateGameState() {
   survivalFrames++;
   survivalSeconds = Math.floor(survivalFrames / 60);
@@ -261,9 +325,10 @@ function updateGameState() {
 }
 
 
-// ==============================
-// 10. MAIN UPDATE
-// ==============================
+// ======================================================
+// 10. MAIN UPDATE FLOW
+// ======================================================
+// This is the order of logic every frame.
 function update() {
   if (gameState !== "playing") return;
 
@@ -274,14 +339,14 @@ function update() {
 }
 
 
-// ==============================
+// ======================================================
 // 11. DRAW BACKGROUND
-// ==============================
+// ======================================================
 function drawBackground() {
   ctx.fillStyle = "#020617";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  // faint stars
+  // Faint star pattern.
   ctx.fillStyle = "#1e293b";
   for (let i = 0; i < 40; i++) {
     const x = (i * 97) % canvas.width;
@@ -291,9 +356,10 @@ function drawBackground() {
 }
 
 
-// ==============================
-// 12. DRAW GLOW
-// ==============================
+// ======================================================
+// 12. DRAW GLOW RADIUS
+// ======================================================
+// Draws the visual version of the glowRadius used by moths.
 function drawGlow() {
   const gradient = ctx.createRadialGradient(
     player.x,
@@ -314,16 +380,23 @@ function drawGlow() {
 }
 
 
-// ==============================
-// 13. DRAW OBJECTS
-// ==============================
+// ======================================================
+// 13. DRAW GAME OBJECTS
+// ======================================================
 function drawPlayer() {
-  ctx.fillStyle = "white";
+  // Player gets dimmer as glow gets lower.
+  const brightness = 80 + (glow / MAX_GLOW) * 175;
+  const playerColor = `rgb(${brightness}, ${brightness}, ${brightness})`;
+
+  ctx.fillStyle = playerColor;
   ctx.beginPath();
   ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.fillStyle = "#facc15";
+  // Lantern core also fades with glow.
+  const coreAlpha = 0.25 + (glow / MAX_GLOW) * 0.75;
+
+  ctx.fillStyle = `rgba(250, 204, 21, ${coreAlpha})`;
   ctx.beginPath();
   ctx.arc(player.x, player.y, 6, 0, Math.PI * 2);
   ctx.fill();
@@ -347,12 +420,14 @@ function drawMoths() {
   for (let moth of moths) {
     const active = distance(moth, player) < glowRadius;
 
+    // Red moths are currently activated by glow.
+    // Gray moths are wandering outside the glow radius.
     ctx.fillStyle = active ? "#ef4444" : "#94a3b8";
     ctx.beginPath();
     ctx.arc(moth.x, moth.y, moth.radius, 0, Math.PI * 2);
     ctx.fill();
 
-    // Wings
+    // Simple wing shapes.
     ctx.strokeStyle = active ? "#fecaca" : "#cbd5e1";
     ctx.beginPath();
     ctx.arc(moth.x - 7, moth.y, 6, 0, Math.PI * 2);
@@ -362,15 +437,16 @@ function drawMoths() {
 }
 
 
-// ==============================
+// ======================================================
 // 14. DRAW HUD
-// ==============================
+// ======================================================
 function drawHUD() {
   ctx.fillStyle = "white";
   ctx.font = "18px Arial";
   ctx.textAlign = "left";
 
   ctx.fillText("Glow", 20, 30);
+
   ctx.strokeStyle = "white";
   ctx.strokeRect(80, 14, 200, 20);
 
@@ -379,15 +455,16 @@ function drawHUD() {
 
   ctx.fillStyle = "white";
   ctx.fillText("Time: " + survivalSeconds + "s", 620, 30);
+  ctx.fillText("Lights: " + lightsAcquired, 620, 60);
 
   ctx.font = "14px Arial";
   ctx.fillText("Glow Radius: " + Math.floor(glowRadius), 20, 58);
 }
 
 
-// ==============================
-// 15. DRAW MESSAGE
-// ==============================
+// ======================================================
+// 15. DRAW WIN / LOSE MESSAGE
+// ======================================================
 function drawMessage(title, subtitle) {
   ctx.fillStyle = "rgba(0,0,0,0.78)";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -405,9 +482,10 @@ function drawMessage(title, subtitle) {
 }
 
 
-// ==============================
-// 16. MAIN DRAW
-// ==============================
+// ======================================================
+// 16. MAIN DRAW FLOW
+// ======================================================
+// This is the order visuals are drawn every frame.
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -428,24 +506,31 @@ function draw() {
 }
 
 
-// ==============================
-// 17. RESTART
-// ==============================
+// ======================================================
+// 17. RESTART SYSTEM
+// ======================================================
 function restartGame() {
   player.x = 400;
   player.y = 300;
+
   glow = 60;
   glowRadius = 120;
+  lightsAcquired = 0;
+
   survivalFrames = 0;
   survivalSeconds = 0;
+
   gameState = "playing";
+
   initializeObjects();
 }
 
 
-// ==============================
+// ======================================================
 // 18. GAME LOOP
-// ==============================
+// ======================================================
+// The loop runs forever:
+// update the game state, draw the current frame, then repeat.
 function gameLoop() {
   update();
   draw();
