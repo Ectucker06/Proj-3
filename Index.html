@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Glowbound</title>
+
+  <style>
+    body {
+      margin: 0;
+      background: #080b12;
+      color: white;
+      font-family: Arial, sans-serif;
+      text-align: center;
+    }
+
+    canvas {
+      background: #0f172a;
+      display: block;
+      margin: 20px auto;
+      border: 3px solid white;
+    }
+
+    p {
+      margin-top: -8px;
+    }
+  </style>
+</head>
+
+<body>
+
+<!-- AI Attribution: ChatGPT was used to help generate, debug, and organize this project. Final design decisions and submission are my own. -->
+
+<h1>Glowbound</h1>
+<p>Move with WASD or Arrow Keys. Collect sparks to keep your glow alive. Too much glow attracts moths.</p>
+
+<canvas id="gameCanvas" width="800" height="600"></canvas>
+
+<script>
+// ==============================
+// 1. CANVAS SETUP
+// ==============================
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+
+
+// ==============================
+// 2. GAME STATE
+// ==============================
+let keys = {};
+let gameState = "playing";
+let survivalFrames = 0;
+let survivalSeconds = 0;
+
+let player = {
+  x: 400,
+  y: 300,
+  radius: 15,
+  speed: 3.5
+};
+
+let glow = 60;
+let glowRadius = 120;
+
+let sparks = [];
+let moths = [];
+
+const MAX_GLOW = 100;
+const WIN_TIME = 90;
+
+
+// ==============================
+// 3. INPUT SYSTEM
+// ==============================
+document.addEventListener("keydown", (e) => {
+  keys[e.key] = true;
+
+  if (e.key.toLowerCase() === "r") {
+    restartGame();
+  }
+});
+
+document.addEventListener("keyup", (e) => {
+  keys[e.key] = false;
+});
+
+
+// ==============================
+// 4. UTILITY FUNCTIONS
+// ==============================
+function distance(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function randomPosition(margin = 30) {
+  return {
+    x: margin + Math.random() * (canvas.width - margin * 2),
+    y: margin + Math.random() * (canvas.height - margin * 2)
+  };
+}
+
+
+// ==============================
+// 5. SETUP OBJECTS
+// ==============================
+function spawnSpark() {
+  const pos = randomPosition(40);
+
+  return {
+    x: pos.x,
+    y: pos.y,
+    radius: 8
+  };
+}
+
+function spawnMoth() {
+  const pos = randomPosition(40);
+
+  return {
+    x: pos.x,
+    y: pos.y,
+    radius: 10,
+    wanderAngle: Math.random() * Math.PI * 2,
+    wanderTimer: 0
+  };
+}
+
+function initializeObjects() {
+  sparks = [];
+  moths = [];
+
+  for (let i = 0; i < 4; i++) {
+    sparks.push(spawnSpark());
+  }
+
+  for (let i = 0; i < 5; i++) {
+    moths.push(spawnMoth());
+  }
+}
+
+
+// ==============================
+// 6. PLAYER MOVEMENT
+// ==============================
+function updatePlayer() {
+  let dx = 0;
+  let dy = 0;
+
+  if (keys["ArrowLeft"] || keys["a"] || keys["A"]) dx -= 1;
+  if (keys["ArrowRight"] || keys["d"] || keys["D"]) dx += 1;
+  if (keys["ArrowUp"] || keys["w"] || keys["W"]) dy -= 1;
+  if (keys["ArrowDown"] || keys["s"] || keys["S"]) dy += 1;
+
+  // Normalize diagonal movement so diagonal speed is not faster.
+  if (dx !== 0 || dy !== 0) {
+    const length = Math.hypot(dx, dy);
+    dx /= length;
+    dy /= length;
+  }
+
+  player.x += dx * player.speed;
+  player.y += dy * player.speed;
+
+  player.x = clamp(player.x, player.radius, canvas.width - player.radius);
+  player.y = clamp(player.y, player.radius, canvas.height - player.radius);
+}
+
+
+// ==============================
+// 7. SYSTEM 1: GLOW SYSTEM
+// ==============================
+// Glow drains over time, increases when sparks are collected,
+// and controls the size of the lantern radius.
+function updateGlowSystem() {
+  glow -= 0.05;
+
+  for (let i = sparks.length - 1; i >= 0; i--) {
+    if (distance(player, sparks[i]) < player.radius + sparks[i].radius) {
+      glow += 25;
+      sparks[i] = spawnSpark();
+    }
+  }
+
+  glow = clamp(glow, 0, MAX_GLOW);
+
+  // More glow means a larger radius.
+  glowRadius = 40 + (glow / MAX_GLOW) * 140;
+}
+
+
+// ==============================
+// 8. SYSTEM 2: MOTH SYSTEM
+// ==============================
+// Moths wander normally, but if they enter the glow radius,
+// they chase the player and damage glow on contact.
+function updateMothSystem() {
+  for (let moth of moths) {
+    const distToPlayer = distance(moth, player);
+
+    if (distToPlayer < glowRadius) {
+      // Chase player when inside glow.
+      const dx = player.x - moth.x;
+      const dy = player.y - moth.y;
+      const length = Math.hypot(dx, dy);
+
+      if (length > 0) {
+        moth.x += (dx / length) * 1.6;
+        moth.y += (dy / length) * 1.6;
+      }
+    } else {
+      // Wander when outside glow.
+      moth.wanderTimer--;
+
+      if (moth.wanderTimer <= 0) {
+        moth.wanderAngle = Math.random() * Math.PI * 2;
+        moth.wanderTimer = 60 + Math.random() * 80;
+      }
+
+      moth.x += Math.cos(moth.wanderAngle) * 0.5;
+      moth.y += Math.sin(moth.wanderAngle) * 0.5;
+    }
+
+    moth.x = clamp(moth.x, moth.radius, canvas.width - moth.radius);
+    moth.y = clamp(moth.y, moth.radius, canvas.height - moth.radius);
+
+    // Contact damage.
+    if (distance(moth, player) < moth.radius + player.radius) {
+      glow -= 15;
+
+      // Push moth away after contact so it does not drain instantly.
+      const dx = moth.x - player.x;
+      const dy = moth.y - player.y;
+      const length = Math.hypot(dx, dy) || 1;
+
+      moth.x += (dx / length) * 50;
+      moth.y += (dy / length) * 50;
+    }
+  }
+
+  glow = clamp(glow, 0, MAX_GLOW);
+}
+
+
+// ==============================
+// 9. GAME STATE
+// ==============================
+function updateGameState() {
+  survivalFrames++;
+  survivalSeconds = Math.floor(survivalFrames / 60);
+
+  if (glow <= 0) {
+    gameState = "gameOver";
+  }
+
+  if (survivalSeconds >= WIN_TIME) {
+    gameState = "win";
+  }
+}
+
+
+// ==============================
+// 10. MAIN UPDATE
+// ==============================
+function update() {
+  if (gameState !== "playing") return;
+
+  updatePlayer();
+  updateGlowSystem();
+  updateMothSystem();
+  updateGameState();
+}
+
+
+// ==============================
+// 11. DRAW BACKGROUND
+// ==============================
+function drawBackground() {
+  ctx.fillStyle = "#020617";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // faint stars
+  ctx.fillStyle = "#1e293b";
+  for (let i = 0; i < 40; i++) {
+    const x = (i * 97) % canvas.width;
+    const y = (i * 53) % canvas.height;
+    ctx.fillRect(x, y, 2, 2);
+  }
+}
+
+
+// ==============================
+// 12. DRAW GLOW
+// ==============================
+function drawGlow() {
+  const gradient = ctx.createRadialGradient(
+    player.x,
+    player.y,
+    10,
+    player.x,
+    player.y,
+    glowRadius
+  );
+
+  gradient.addColorStop(0, "rgba(250, 204, 21, 0.45)");
+  gradient.addColorStop(1, "rgba(250, 204, 21, 0)");
+
+  ctx.fillStyle = gradient;
+  ctx.beginPath();
+  ctx.arc(player.x, player.y, glowRadius, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+
+// ==============================
+// 13. DRAW OBJECTS
+// ==============================
+function drawPlayer() {
+  ctx.fillStyle = "white";
+  ctx.beginPath();
+  ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = "#facc15";
+  ctx.beginPath();
+  ctx.arc(player.x, player.y, 6, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawSparks() {
+  for (let spark of sparks) {
+    ctx.fillStyle = "#facc15";
+    ctx.beginPath();
+    ctx.arc(spark.x, spark.y, spark.radius, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = "rgba(250, 204, 21, 0.7)";
+    ctx.beginPath();
+    ctx.arc(spark.x, spark.y, spark.radius + 6, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+}
+
+function drawMoths() {
+  for (let moth of moths) {
+    const active = distance(moth, player) < glowRadius;
+
+    ctx.fillStyle = active ? "#ef4444" : "#94a3b8";
+    ctx.beginPath();
+    ctx.arc(moth.x, moth.y, moth.radius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Wings
+    ctx.strokeStyle = active ? "#fecaca" : "#cbd5e1";
+    ctx.beginPath();
+    ctx.arc(moth.x - 7, moth.y, 6, 0, Math.PI * 2);
+    ctx.arc(moth.x + 7, moth.y, 6, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+}
+
+
+// ==============================
+// 14. DRAW HUD
+// ==============================
+function drawHUD() {
+  ctx.fillStyle = "white";
+  ctx.font = "18px Arial";
+  ctx.textAlign = "left";
+
+  ctx.fillText("Glow", 20, 30);
+  ctx.strokeStyle = "white";
+  ctx.strokeRect(80, 14, 200, 20);
+
+  ctx.fillStyle = glow > 50 ? "#facc15" : "#ef4444";
+  ctx.fillRect(80, 14, glow * 2, 20);
+
+  ctx.fillStyle = "white";
+  ctx.fillText("Time: " + survivalSeconds + "s", 620, 30);
+
+  ctx.font = "14px Arial";
+  ctx.fillText("Glow Radius: " + Math.floor(glowRadius), 20, 58);
+}
+
+
+// ==============================
+// 15. DRAW MESSAGE
+// ==============================
+function drawMessage(title, subtitle) {
+  ctx.fillStyle = "rgba(0,0,0,0.78)";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.fillStyle = "white";
+  ctx.textAlign = "center";
+
+  ctx.font = "48px Arial";
+  ctx.fillText(title, canvas.width / 2, 260);
+
+  ctx.font = "24px Arial";
+  ctx.fillText(subtitle, canvas.width / 2, 310);
+
+  ctx.textAlign = "left";
+}
+
+
+// ==============================
+// 16. MAIN DRAW
+// ==============================
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  drawBackground();
+  drawGlow();
+  drawSparks();
+  drawMoths();
+  drawPlayer();
+  drawHUD();
+
+  if (gameState === "gameOver") {
+    drawMessage("THE LIGHT WENT OUT", "Press R to Restart");
+  }
+
+  if (gameState === "win") {
+    drawMessage("YOU ENDURED", "Press R to Play Again");
+  }
+}
+
+
+// ==============================
+// 17. RESTART
+// ==============================
+function restartGame() {
+  player.x = 400;
+  player.y = 300;
+  glow = 60;
+  glowRadius = 120;
+  survivalFrames = 0;
+  survivalSeconds = 0;
+  gameState = "playing";
+  initializeObjects();
+}
+
+
+// ==============================
+// 18. GAME LOOP
+// ==============================
+function gameLoop() {
+  update();
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+
+initializeObjects();
+gameLoop();
+</script>
+
+</body>
+</html>
